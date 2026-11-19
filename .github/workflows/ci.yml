@@ -1,17 +1,21 @@
 name: MeganeCAN unified CI
 
-# Native unit tests (fast, no hardware) + both firmware target builds, on every push
-# and PR. Mirrors scripts/ci.{sh,ps1}. The native env needs a host g++ (ubuntu has it);
-# PlatformIO downloads the espressif32 platform + libs for the firmware builds.
+# Exactly one job per push. Run checks sequentially so GitHub displays
+# a single job, rather than one job per matrix environment.
 on:
   push:
     branches: ["**"]
-  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: meganecan-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  native-tests:
-    name: native unit tests
+  verify:
+    name: Test and build all targets
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,39 +25,32 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: pio-native-${{ hashFiles('platformio.ini') }}
-      - run: pip install -U platformio
-      - name: pio test -e native
-        run: pio test -e native
-
-  firmware-build:
-    name: build ${{ matrix.env }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        env: [esp32dev, esp32dev-mini, weact-esp32c5-passive]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Cache PlatformIO
-        uses: actions/cache@v4
-        with:
-          path: ~/.platformio
-          key: pio-${{ matrix.env }}-${{ hashFiles('platformio.ini') }}
-      - run: pip install -U platformio
-      # secrets.h is intentionally untracked; provide a stub so the build links in CI.
-      - name: stub secrets.h
+          key: pio-unified-${{ hashFiles('platformio.ini') }}
+      - name: Install PlatformIO
+        run: pip install -U platformio
+      - name: Stub local-only secrets.h
         run: |
           if [ ! -f src/secrets.h ]; then
             printf '#pragma once\n#define Soft_AP_WIFI_SSID "MeganeCAN-CI"\n#define Soft_AP_WIFI_PASS "ci-build-only"\n' > src/secrets.h
           fi
-      - name: pio run -e ${{ matrix.env }}
-        run: pio run -e ${{ matrix.env }}
+      - name: Native unit tests
+        id: native
+        continue-on-error: true
+        run: pio test -e native
+      - name: Build ESP32
+        id: esp32
+        continue-on-error: true
+        run: pio run -e esp32dev
+      - name: Build ESP32-C3
+        id: c3
+        continue-on-error: true
+        run: pio run -e esp32dev-mini
+      - name: Build WeAct ESP32-C5 passive
+        id: c5
+        continue-on-error: true
+        run: pio run -e weact-esp32c5-passive
       - name: Upload ESP32-C5 firmware
-        if: success() && matrix.env == 'weact-esp32c5-passive'
+        if: steps.c5.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: weact-esp32c5-passive
@@ -62,3 +59,15 @@ jobs:
             .pio/build/weact-esp32c5-passive/bootloader.bin
             .pio/build/weact-esp32c5-passive/partitions.bin
           if-no-files-found: warn
+      - name: Final result
+        if: always()
+        env:
+          NATIVE: ${{ steps.native.outcome }}
+          ESP32: ${{ steps.esp32.outcome }}
+          C3: ${{ steps.c3.outcome }}
+          C5: ${{ steps.c5.outcome }}
+        run: |
+          echo "native=$NATIVE esp32=$ESP32 esp32c3=$C3 esp32c5=$C5"
+          if [ "$NATIVE" != success ] || [ "$ESP32" != success ] || [ "$C3" != success ] || [ "$C5" != success ]; then
+            exit 1
+          fi
