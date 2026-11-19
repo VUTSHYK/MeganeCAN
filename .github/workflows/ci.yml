@@ -41,17 +41,13 @@ jobs:
         id: c5
         continue-on-error: true
         run: pio run -e weact-esp32c5-passive
-      - name: Create merged ESP32-C5 factory image
-        if: steps.c5.outcome == 'success'
-        run: |
-          python -m esptool --chip esp32c5 merge_bin -o .pio/build/weact-esp32c5-passive/factory.bin --flash_mode dio --flash_freq 80m --flash_size 4MB 0x2000 .pio/build/weact-esp32c5-passive/bootloader.bin 0x8000 .pio/build/weact-esp32c5-passive/partitions.bin 0x10000 .pio/build/weact-esp32c5-passive/firmware.bin
       - name: Upload ESP32-C5 firmware
         if: steps.c5.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: weact-esp32c5-passive
           path: |
-            .pio/build/weact-esp32c5-passive/factory.bin
+            .pio/build/weact-esp32c5-passive/firmware.factory.bin
             .pio/build/weact-esp32c5-passive/firmware.bin
             .pio/build/weact-esp32c5-passive/bootloader.bin
             .pio/build/weact-esp32c5-passive/partitions.bin
