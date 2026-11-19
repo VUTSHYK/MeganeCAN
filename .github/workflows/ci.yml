@@ -1,4 +1,4 @@
-name: CI
+name: MeganeCAN unified CI
 
 # Native unit tests (fast, no hardware) + both firmware target builds, on every push
 # and PR. Mirrors scripts/ci.{sh,ps1}. The native env needs a host g++ (ubuntu has it);
@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [esp32dev, esp32dev-mini]
+        env: [esp32dev, esp32dev-mini, weact-esp32c5-passive]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -52,3 +52,13 @@ jobs:
           fi
       - name: pio run -e ${{ matrix.env }}
         run: pio run -e ${{ matrix.env }}
+      - name: Upload ESP32-C5 firmware
+        if: success() && matrix.env == 'weact-esp32c5-passive'
+        uses: actions/upload-artifact@v4
+        with:
+          name: weact-esp32c5-passive
+          path: |
+            .pio/build/weact-esp32c5-passive/firmware.bin
+            .pio/build/weact-esp32c5-passive/bootloader.bin
+            .pio/build/weact-esp32c5-passive/partitions.bin
+          if-no-files-found: warn
