@@ -1,4 +1,6 @@
 #pragma once
+#include <string>
+#include <cstddef>
 #include "display/IDisplay.h"
 #include "utils/Log.h"
 
