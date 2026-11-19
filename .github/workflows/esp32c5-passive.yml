@@ -1,0 +1,32 @@
+name: ESP32-C5 passive CAN build
+
+on:
+  push:
+    branches:
+      - feature/esp32c5-weact-can
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-esp32c5:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO
+        run: python -m pip install --upgrade platformio
+      - name: Build ESP32-C5 passive firmware
+        run: pio run -e weact-esp32c5-passive
+      - name: Upload firmware and build artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weact-esp32c5-passive
+          path: |
+            .pio/build/weact-esp32c5-passive/firmware.bin
+            .pio/build/weact-esp32c5-passive/bootloader.bin
+            .pio/build/weact-esp32c5-passive/partitions.bin
+          if-no-files-found: warn
