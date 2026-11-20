@@ -1,6 +1,7 @@
 #include "WeActCan.h"
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
 #include <Arduino.h>
+#include <esp_timer.h>
 #include <esp_twai.h>
 #include <esp_twai_onchip.h>
 #include <freertos/FreeRTOS.h>
@@ -11,6 +12,7 @@ constexpr size_t QUEUE_LEN = 256;
 struct Slot {
     twai_frame_t frame;
     uint8_t data[TWAIFD_FRAME_MAX_LEN];
+    uint64_t received_us;
 };
 Slot slots[QUEUE_LEN];
 SemaphoreHandle_t freeSlots = nullptr;
@@ -18,6 +20,7 @@ SemaphoreHandle_t readySlots = nullptr;
 volatile size_t writePos = 0;
 size_t readPos = 0;
 volatile uint32_t lost = 0;
+uint32_t skipped = 0;
 twai_node_handle_t node = nullptr;
 WeActCan::ReceiveFn receiver = nullptr;
 void* receiverCtx = nullptr;
@@ -31,6 +34,7 @@ bool IRAM_ATTR onReceive(twai_node_handle_t handle,
     }
     Slot& s = slots[writePos];
     if (twai_node_receive_from_isr(handle, &s.frame) == ESP_OK) {
+        s.received_us = static_cast<uint64_t>(esp_timer_get_time());
         writePos = (writePos + 1) % QUEUE_LEN;
         xSemaphoreGiveFromISR(readySlots, &wake);
     } else {
@@ -79,34 +83,36 @@ bool begin(ReceiveFn callback, void* context) {
 }
 
 unsigned poll(unsigned maxFrames) {
-    unsigned count = 0;
+    unsigned consumed = 0;
     if (!node) return 0;
-    while (count < maxFrames && xSemaphoreTake(readySlots, 0) == pdTRUE) {
+    while (consumed < maxFrames && xSemaphoreTake(readySlots, 0) == pdTRUE) {
         Slot& s = slots[readPos];
         const twai_frame_t& raw = s.frame;
         if (!raw.header.fdf && raw.header.dlc <= 8) {
-            Frame f;
+            Frame f{};
             f.id = raw.header.id;
             f.extended = raw.header.ide;
             f.len = raw.header.dlc;
             f.source = Frame::SRC_MM_CAN;
             for (unsigned i = 0; i < f.len; ++i) f.data[i] = s.data[i];
-            receiver(f, receiverCtx);
-            ++count;
+            receiver(f, s.received_us, receiverCtx);
+        } else {
+            ++skipped;
         }
+        ++consumed;
         readPos = (readPos + 1) % QUEUE_LEN;
         xSemaphoreGive(freeSlots);
     }
-    return count;
+    return consumed;
 }
-
 uint32_t dropped() { return lost; }
+uint32_t unsupported() { return skipped; }
 }
 #else
-// The ESP32-C5 adapter is not compiled for existing ESP32/C3 targets.
 namespace WeActCan {
 bool begin(ReceiveFn, void*) { return false; }
 unsigned poll(unsigned) { return 0; }
 uint32_t dropped() { return 0; }
+uint32_t unsupported() { return 0; }
 }
 #endif
