@@ -1,12 +1,13 @@
-// Minimal ESP32-C5 firmware entry point using MeganeCAN's portable Frame.
-// Safe first-stage target: hardware CAN listen-only, serial log, no CAN TX.
+// ESP32-C5 passive capture: listen-only, no CAN transmission.
 #include <Arduino.h>
 #include "bus/WeActCan.h"
 
 static uint32_t seen = 0;
-static void received(const Frame& frame, void*) {
+static void received(const Frame& frame, uint64_t received_us, void*) {
     ++seen;
-    Serial.printf("@RX %lu %s %08lX %u", (unsigned long)millis(),
+    // Timestamp belongs to the receive callback, not to serial output.
+    Serial.printf("@RX %llu %s %08lX %u",
+                  (unsigned long long)received_us,
                   frame.extended ? "EXT" : "STD",
                   (unsigned long)frame.id, (unsigned)frame.len);
     for (uint8_t i = 0; i < frame.len; ++i)
@@ -30,8 +31,10 @@ void loop() {
     static uint32_t last = 0;
     if (millis() - last >= 5000) {
         last = millis();
-        Serial.printf("# frames=%lu dropped=%lu\n",
-                      (unsigned long)seen, (unsigned long)WeActCan::dropped());
+        Serial.printf("# frames=%lu dropped=%lu unsupported=%lu\n",
+                      (unsigned long)seen,
+                      (unsigned long)WeActCan::dropped(),
+                      (unsigned long)WeActCan::unsupported());
     }
     delay(1);
 }
